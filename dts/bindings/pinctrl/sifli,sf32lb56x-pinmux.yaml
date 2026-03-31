@@ -1,0 +1,74 @@
+# Copyright (c) 2025 Core Devices LLC
+# Copyright (c) 2025 SiFli Technologies(Nanjing) Co., Ltd
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+    SF32LB56x Pin multiplexer and pin configuration controller.
+
+    Covers HPSYS_PINMUX (SA and PA pins) and LPSYS_PINMUX (PB pins).
+    Three reg entries are required: pad_sa, pad_pa, pad_pb.
+
+    See sifli,sf32lb52x-pinmux.yaml for general usage. PB pins support
+    FSEL, PE, PS and IE configuration; drive-strength is not available
+    on LPSYS PB pins.
+
+compatible: "sifli,sf32lb56x-pinmux"
+
+include: [base.yaml, sifli-sf32lb-cfg.yaml]
+
+properties:
+  reg:
+    required: true
+
+  reg-names:
+    required: true
+
+  clocks:
+    required: true
+
+  sifli,cfg:
+    required: true
+
+  "#sifli,pinmux-cells":
+    type: int
+    const: 2
+
+sifli,pinmux-cells:
+  - port
+  - offset
+
+child-binding:
+  child-binding:
+    include:
+      - name: pincfg-node.yaml
+        property-allowlist:
+          - bias-pull-down
+          - bias-pull-up
+          - input-enable
+          - input-schmitt-enable
+          - slew-rate
+          - drive-strength
+
+    properties:
+      pinmux:
+        required: true
+        type: array
+        description: |
+          An array of pins sharing the same group properties. The pins should
+          be defined using pre-defined macros or, alternatively, using the
+          SF32LB_PINMUX utility macro.
+
+      slew-rate:
+        default: 0
+        enum:
+          - 0
+          - 1
+
+      drive-strength:
+        default: 4
+        enum:
+          - 2
+          - 8
+          - 4
+          - 12
+          - 20

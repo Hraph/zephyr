@@ -42,6 +42,7 @@ struct gpio_sf32lb_config {
 	struct gpio_driver_config common;
 	uintptr_t gpio;
 	uintptr_t pinmux;
+	struct sf32lb_clock_dt_spec parent_clk;
 };
 
 struct gpio_sf32lb_data {
@@ -49,36 +50,6 @@ struct gpio_sf32lb_data {
 	sys_slist_t callbacks;
 	gpio_port_pins_t od;
 };
-
-static bool shared_initialized;
-static const struct device *controllers[] = {
-	DT_FOREACH_CHILD_STATUS_OKAY_SEP(DT_INST_PARENT(0), DEVICE_DT_GET, (,)),
-};
-
-BUILD_ASSERT((DT_NODE_HAS_COMPAT(DT_INST_PARENT(0), sifli_sf32lb_gpio_parent)) &&
-		     (DT_NUM_INST_STATUS_OKAY(sifli_sf32lb_gpio_parent) == 1),
-	     "Only one parent instance is supported");
-
-static void gpio_sf32lb_irq(const void *arg)
-{
-	for (size_t c = 0U; c < ARRAY_SIZE(controllers); c++) {
-		const struct gpio_sf32lb_config *config = controllers[c]->config;
-		struct gpio_sf32lb_data *data = controllers[c]->data;
-		uint8_t min, max;
-		uint32_t val;
-
-		min = u32_count_trailing_zeros(config->common.port_pin_mask);
-		max = 32 - u32_count_leading_zeros(config->common.port_pin_mask);
-
-		val = sys_read32(config->gpio + GPIO1_ISRX);
-		for (uint8_t i = min; i < max; i++) {
-			if ((val & BIT(i)) != 0U) {
-				gpio_fire_callbacks(&data->callbacks, controllers[c], BIT(i));
-			}
-		}
-		sys_write32(val, config->gpio + GPIO1_ISRX);
-	}
-}
 
 static inline int gpio_sf32lb_configure(const struct device *port, gpio_pin_t pin,
 					gpio_flags_t flags)
@@ -132,9 +103,9 @@ static inline int gpio_sf32lb_configure(const struct device *port, gpio_pin_t pi
 	/* configure pad settings in PINMUX */
 	val = PINMUX_PAD_XXYY_SR_SLOW;
 
-	if ((flags & GPIO_INPUT) != 0U) {
-		val |= PINMUX_PAD_XXYY_IE;
-	}
+	/* Always enable IE — SiFli pads require IE for proper output drive.
+	 * RT-Thread HAL_PIN_Set always sets IE even for output pins. */
+	val |= PINMUX_PAD_XXYY_IE;
 
 	if ((flags & GPIO_PULL_UP) != 0U) {
 		val |= PINMUX_PAD_XXYY_PE | PINMUX_PAD_XXYY_PS_PUP;
@@ -293,40 +264,94 @@ static DEVICE_API(gpio, gpio_sf32lb_api) = {
 	.manage_callback = gpio_sf32lb_manage_callback,
 };
 
-static int gpio_sf32lb_init(const struct device *dev)
-{
-	if (!shared_initialized) {
-		struct sf32lb_clock_dt_spec clk = SF32LB_CLOCK_DT_SPEC_GET(DT_INST_PARENT(0));
+/* Forward declaration — defined after all instances so DEVICE_DT_INST_GET works. */
+static void gpio_sf32lb_isr(const void *arg);
 
-		if (!sf32lb_clock_is_ready_dt(&clk)) {
-			return -ENODEV;
-		}
-
-		(void)sf32lb_clock_control_on_dt(&clk);
-
-		IRQ_CONNECT(DT_IRQN(DT_INST_PARENT(0)), DT_IRQ(DT_INST_PARENT(0), priority),
-			    gpio_sf32lb_irq, NULL, 0);
-		irq_enable(DT_IRQN(DT_INST_PARENT(0)));
-
-		shared_initialized = true;
-	}
-
-	return 0;
-}
-
+/*
+ * Per-instance macro: defines config/data structs and an init function.
+ *
+ * IRQ registration uses CONFIG_DYNAMIC_INTERRUPTS so IRQ_CONNECT is a
+ * pure runtime call (no compile-time .intList entry). This allows multiple
+ * instances sharing the same parent IRQ (e.g. gpioa_00_31 and gpioa_32_44
+ * both on IRQ 84) to each call IRQ_CONNECT with the same handler function
+ * (gpio_sf32lb_isr). The second call is a no-op since it writes the same
+ * function pointer to the same IRQ slot. irq_enable() is idempotent.
+ */
 #define GPIO_SF32LB_DEFINE(n)                                                                      \
-	static const struct gpio_sf32lb_config gpio_sf32lb_config##n = {                           \
+	static const struct gpio_sf32lb_config gpio_sf32lb_config##n = {                          \
 		.common = GPIO_COMMON_CONFIG_FROM_DT_INST(n),                                      \
 		.gpio = DT_INST_REG_ADDR(n),                                                       \
-		.pinmux = DT_REG_ADDR_BY_IDX(DT_INST_PHANDLE(n, sifli_pinmuxs),                    \
-					     DT_INST_PHA(n, sifli_pinmuxs, port)) +                \
+		.pinmux = DT_REG_ADDR_BY_IDX(DT_INST_PHANDLE(n, sifli_pinmuxs),                  \
+					      DT_INST_PHA(n, sifli_pinmuxs, port)) +          \
 			  DT_INST_PHA(n, sifli_pinmuxs, offset),                                   \
+		.parent_clk = SF32LB_CLOCK_DT_SPEC_GET_OR(DT_INST_PARENT(n),                     \
+				((struct sf32lb_clock_dt_spec){.dev = NULL, .id = 0})),            \
 	};                                                                                         \
                                                                                                    \
 	static struct gpio_sf32lb_data gpio_sf32lb_data##n;                                        \
                                                                                                    \
-	DEVICE_DT_INST_DEFINE(n, gpio_sf32lb_init, NULL, &gpio_sf32lb_data##n,                     \
+	static int gpio_sf32lb_init_##n(const struct device *dev)                                 \
+	{                                                                                          \
+		const struct gpio_sf32lb_config *cfg = dev->config;                                \
+                                                                                                   \
+		if (cfg->parent_clk.dev != NULL) {                                                 \
+			if (!sf32lb_clock_is_ready_dt(&cfg->parent_clk)) {                         \
+				return -ENODEV;                                                    \
+			}                                                                          \
+			(void)sf32lb_clock_control_on_dt(&cfg->parent_clk);                        \
+		}                                                                                   \
+                                                                                                   \
+		/* Use irq_connect_dynamic to avoid duplicate Z_ISR_DECLARE entries    \
+		 * when multiple child instances share the same parent IRQ (e.g.       \
+		 * gpioa_00_31 and gpioa_32_56 both on IRQ 84). IRQ_CONNECT emits a   \
+		 * static .intList entry which causes gen_isr_tables.py to fail.       \
+		 */                                                                    \
+		irq_connect_dynamic(DT_IRQN(DT_INST_PARENT(n)),                       \
+				    DT_IRQ(DT_INST_PARENT(n), priority),               \
+				    gpio_sf32lb_isr, NULL, 0);                         \
+		irq_enable(DT_IRQN(DT_INST_PARENT(n)));                                           \
+                                                                                                   \
+		return 0;                                                                          \
+	}                                                                                          \
+                                                                                                   \
+	DEVICE_DT_INST_DEFINE(n, gpio_sf32lb_init_##n, NULL, &gpio_sf32lb_data##n,                \
 			      &gpio_sf32lb_config##n, PRE_KERNEL_1, CONFIG_GPIO_INIT_PRIORITY,     \
 			      &gpio_sf32lb_api);
 
 DT_INST_FOREACH_STATUS_OKAY(GPIO_SF32LB_DEFINE)
+
+/*
+ * Single shared ISR: iterates ALL enabled gpio instances and dispatches
+ * callbacks for any with pending interrupt bits. Defined after the instances
+ * so DEVICE_DT_INST_GET is valid.
+ *
+ * Each instance reads its own ISR register; instances whose parent IRQ did
+ * not fire will have val == 0 and exit immediately. This avoids the need for
+ * per-parent sibling arrays and removes the duplicate IRQ_CONNECT issue that
+ * arises when multiple children share one parent IRQ.
+ */
+#define GPIO_SF32LB_ISR_DISPATCH(n)                                                                \
+	{                                                                                          \
+		const struct device *_dev = DEVICE_DT_INST_GET(n);                                \
+		const struct gpio_sf32lb_config *_cfg = _dev->config;                             \
+		struct gpio_sf32lb_data *_data = _dev->data;                                       \
+		uint32_t _val = sys_read32(_cfg->gpio + GPIO1_ISRX);                              \
+                                                                                                   \
+		if (_val != 0U) {                                                                  \
+			uint8_t _min = u32_count_trailing_zeros(_cfg->common.port_pin_mask);       \
+			uint8_t _max = 32 - u32_count_leading_zeros(_cfg->common.port_pin_mask);   \
+                                                                                                   \
+			for (uint8_t _i = _min; _i < _max; _i++) {                                \
+				if ((_val & BIT(_i)) != 0U) {                                      \
+					gpio_fire_callbacks(&_data->callbacks, _dev, BIT(_i));     \
+				}                                                                  \
+			}                                                                          \
+			sys_write32(_val, _cfg->gpio + GPIO1_ISRX);                                \
+		}                                                                                   \
+	}
+
+static void gpio_sf32lb_isr(const void *arg)
+{
+	ARG_UNUSED(arg);
+	DT_INST_FOREACH_STATUS_OKAY(GPIO_SF32LB_ISR_DISPATCH)
+}

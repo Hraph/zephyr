@@ -1,0 +1,18 @@
+# Copyright (c) 2025 Core Devices LLC
+# Copyright (c) 2026 Hraph
+# SPDX-License-Identifier: Apache-2.0
+
+config SOC_SERIES_SF32LB56X
+	bool
+	select SOC_FAMILY_SF32
+
+config SOC_SERIES
+	default "sf32lb56x" if SOC_SERIES_SF32LB56X
+
+config SOC_SF32LB56X
+	bool
+	select SOC_SERIES_SF32LB56X
+	select CPU_HAS_ARM_MPU
+
+config SOC
+	default "sf32lb56x" if SOC_SF32LB56X

@@ -1,0 +1,30 @@
+/*
+ * Copyright (c) 2025 Core Devices LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
+#include <mem.h>
+
+/ {
+	chosen {
+		zephyr,sram = &ram0123;
+	};
+
+	soc {
+		/* HPSYS RAM: 800 KB total (RAM0=128K + RAM1=128K + RAM2=256K + RAM3=288K)
+		 * Reserve last 2 KB for mailbox shared memory */
+		ram0123: memory@20000000 {
+			compatible = "mmio-sram";
+			reg = <0x20000000 DT_SIZE_K(798)>;
+		};
+
+		sram_mbox: memory@200c7800 {
+			compatible = "zephyr,memory-region", "mmio-sram";
+			reg = <0x200c7800 DT_SIZE_K(2)>;
+			device_type = "memory";
+			zephyr,memory-region = "sram_mbox";
+			zephyr,memory-attr = <DT_MEM_ARM(ATTR_MPU_RAM_NOCACHE)>;
+		};
+	};
+};

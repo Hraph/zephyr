@@ -22,7 +22,7 @@ properties:
     const: 1
 
   clocks:
-    required: true
+    required: false
 
   interrupts:
     required: true

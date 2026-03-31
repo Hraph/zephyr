@@ -7,11 +7,15 @@ if(CONFIG_HAS_SIFLI_HAL)
   zephyr_compile_definitions(SOC_BF0_HCPU)
   if(CONFIG_SOC_SERIES_SF32LB52X)
     zephyr_compile_definitions(SF32LB52X)
+  elseif(CONFIG_SOC_SERIES_SF32LB56X)
+    zephyr_compile_definitions(SF32LB56X)
   endif()
 
   zephyr_include_directories(${ZEPHYR_HAL_SIFLI_MODULE_DIR}/cmsis/Include)
   if(CONFIG_SOC_SERIES_SF32LB52X)
     zephyr_include_directories(${ZEPHYR_HAL_SIFLI_MODULE_DIR}/cmsis/sf32lb52x)
+  elseif(CONFIG_SOC_SERIES_SF32LB56X)
+    zephyr_include_directories(${ZEPHYR_HAL_SIFLI_MODULE_DIR}/cmsis/sf32lb56x)
   endif()
   zephyr_include_directories_ifdef(
     CONFIG_BT_SF32LB

@@ -1,0 +1,10 @@
+# Copyright (c) 2025 Core Devices LLC
+# SPDX-License-Identifier: Apache-2.0
+
+config PINCTRL_SF32LB56X
+	bool "Pin controller driver for SiFli SF32LB56X series"
+	default y
+	depends on DT_HAS_SIFLI_SF32LB56X_PINMUX_ENABLED
+	help
+	  Enable pin controller driver for SiFli SF32LB56X series.
+	  Supports HPSYS SA/PA pins and LPSYS PB pins.

@@ -1,0 +1,26 @@
+/*
+ * Copyright (c) 2026 Hraph
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/dt-bindings/pinctrl/sf32lb56x-pinctrl.h>
+
+&pinctrl {
+	/* I2C1: touch / sensor */
+	i2c1_default: i2c1_default {
+		group1 {
+			pinmux = <PA33_I2C1_SDA>, <PA30_I2C1_SCL>;
+			input-enable;
+		};
+	};
+
+	/* USART4: PB16/17 — LPSYS pins configured by bootloader.
+	 * Dummy pinctrl to satisfy binding; use PA02 GPIO (unused) to avoid
+	 * conflicting with other HPSYS pins. No actual HPSYS pin is configured. */
+	usart4_default: usart4_default {
+		group1 {
+			pinmux = <PA02_GPIO>;
+		};
+	};
+
+};
